@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import initSqlJs from 'sql.js';
+import { initSqlJs } from 'sql.js';
 
 export interface User {
   id: string;
