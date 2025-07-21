@@ -172,7 +172,6 @@ class DatabaseService {
     };
     
     console.warn('Database is running in fallback mode with limited functionality');
-    }
   }
 
   private saveToLocalStorage() {
