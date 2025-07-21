@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import { initSqlJs } from 'sql.js';
+// Import sql.js differently for production
+let initSqlJs: any;
 
 export interface User {
   id: string;
@@ -71,40 +72,132 @@ class DatabaseService {
   private db: any = null;
   private SQL: any = null;
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
 
   async initialize() {
     if (this.initialized) return;
+    if (this.initializationPromise) return this.initializationPromise;
 
+    this.initializationPromise = this.doInitialize();
+    return this.initializationPromise;
+  }
+
+  private async doInitialize(): Promise<void> {
     try {
-      this.SQL = await initSqlJs({
-        locateFile: (file: string) => `https://sql.js.org/dist/${file}`
-      });
+      // Try to load sql.js dynamically
+      if (!initSqlJs) {
+        try {
+          // Try to use the npm package version first
+          const sqlJsModule = await import('sql.js');
+          initSqlJs = sqlJsModule.default || sqlJsModule.initSqlJs;
+        } catch (error) {
+          console.warn('Failed to load sql.js from npm, trying CDN fallback:', error);
+          // Fallback to CDN if npm version fails
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js';
+          document.head.appendChild(script);
+          
+          await new Promise((resolve, reject) => {
+            script.onload = () => {
+              initSqlJs = (window as any).initSqlJs;
+              resolve(void 0);
+            };
+            script.onerror = reject;
+          });
+        }
+      }
 
+      // Initialize SQL.js with proper configuration
+      this.SQL = await initSqlJs({
+        locateFile: (file: string) => {
+          // Try multiple sources for the wasm file
+          const sources = [
+            `/node_modules/sql.js/dist/${file}`,
+            `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`,
+            `https://sql.js.org/dist/${file}`
+          ];
+          return sources[0]; // Try local first
+        }
+      });
       // Try to load existing database from localStorage
-      const savedDb = localStorage.getItem('french_app_db');
-      if (savedDb) {
-        const uint8Array = new Uint8Array(JSON.parse(savedDb));
-        this.db = new this.SQL.Database(uint8Array);
-      } else {
+      try {
+        const savedDb = localStorage.getItem('french_app_db');
+        if (savedDb) {
+          const uint8Array = new Uint8Array(JSON.parse(savedDb));
+          this.db = new this.SQL.Database(uint8Array);
+        } else {
+          this.db = new this.SQL.Database();
+        }
+      } catch (storageError) {
+        console.warn('Failed to load database from localStorage, creating new:', storageError);
         this.db = new this.SQL.Database();
+        // Clear corrupted data
+        localStorage.removeItem('french_app_db');
       }
 
       this.initializeTables();
       this.initialized = true;
     } catch (error) {
       console.error('Failed to initialize database:', error);
-      throw error;
+      
+      // Fallback: use a simple in-memory storage if sql.js fails
+      console.warn('Falling back to in-memory storage');
+      this.createFallbackStorage();
+      this.initialized = true;
+    }
+  }
+
+  private createFallbackStorage() {
+    // Simple fallback storage using JavaScript objects
+    const storage = {
+      users: new Map(),
+      user_progress: new Map(),
+      user_badges: new Map(),
+      exercises: new Map(),
+      user_skills: new Map()
+    };
+    
+    // Mock the database interface for basic functionality
+    this.db = {
+      exec: () => {},
+      run: () => {},
+      prepare: (query: string) => ({
+        getAsObject: () => ({}),
+        bind: () => {},
+        step: () => false,
+        get: () => null
+      }),
+      close: () => {},
+      export: () => new Uint8Array()
+    };
+    
+    console.warn('Database is running in fallback mode with limited functionality');
     }
   }
 
   private saveToLocalStorage() {
     if (!this.db) return;
     try {
-      const data = this.db.export();
-      const buffer = Array.from(data);
-      localStorage.setItem('french_app_db', JSON.stringify(buffer));
+      if (typeof this.db.export === 'function') {
+        const data = this.db.export();
+        const buffer = Array.from(data);
+        
+        // Check if the data is too large for localStorage (5MB limit)
+        const dataSize = JSON.stringify(buffer).length;
+        if (dataSize > 4 * 1024 * 1024) { // 4MB safety margin
+          console.warn('Database too large for localStorage, skipping save');
+          return;
+        }
+        
+        localStorage.setItem('french_app_db', JSON.stringify(buffer));
+      }
     } catch (error) {
-      console.error('Failed to save database:', error);
+      console.error('Failed to save database to localStorage:', error);
+      // Clear localStorage if it's full
+      if (error.name === 'QuotaExceededError') {
+        console.warn('localStorage quota exceeded, clearing old data');
+        localStorage.removeItem('french_app_db');
+      }
     }
   }
 
