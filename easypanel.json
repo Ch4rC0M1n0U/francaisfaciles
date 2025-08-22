@@ -1,0 +1,33 @@
+{
+  "_comment": "FrançaisPro - Configuration Easypanel | @author FrançaisPro Team | @version 1.0.0 | @license MIT",
+  "name": "francais-pro",
+  "description": "Application d'entraînement au français avec IA pour collégiens",
+  "version": "1.0.0",
+  "type": "dockerfile",
+  "dockerfile": "./Dockerfile",
+  "port": 80,
+  "environment": [
+    {
+      "name": "VITE_GEMINI_API_KEY",
+      "value": "${VITE_GEMINI_API_KEY}",
+      "required": true,
+      "description": "Clé API Gemini pour la génération d'exercices"
+    }
+  ],
+  "healthCheck": {
+    "path": "/health",
+    "port": 80,
+    "initialDelaySeconds": 30,
+    "periodSeconds": 30
+  },
+  "resources": {
+    "memory": "512Mi",
+    "cpu": "500m"
+  },
+  "buildArgs": [
+    {
+      "name": "VITE_GEMINI_API_KEY",
+      "value": "${VITE_GEMINI_API_KEY}"
+    }
+  ]
+}
